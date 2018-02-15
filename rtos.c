@@ -139,7 +139,7 @@ rtos_tick_t rtos_get_clock(void)
 void rtos_delay(rtos_tick_t ticks)
 {
     task_list.tasks[task_list.current_task].state = S_WAITING;
-    task_list.tasks[task_list.current_task].local_tick += ticks;
+    task_list.tasks[task_list.current_task].local_tick = ticks;
     dispatcher(kFromNormalExec);
 }
 
@@ -151,7 +151,7 @@ void rtos_suspend_task(void)
 
 void rtos_activate_task(rtos_task_handle_t task)
 {
-    task_list.tasks[task_list.current_task].state = S_READY;
+    task_list.tasks[task].state = S_READY;
     dispatcher(kFromNormalExec);
 }
 
@@ -170,7 +170,7 @@ static void dispatcher(task_switch_type_e type)
 {
     rtos_task_handle_t next_task = RTOS_INVALID_TASK;
     uint8_t index;
-    uint8_t highest = -1;
+    int8_t highest = -1;
     for(index = 0 ; index < task_list.nTasks ; index ++)
     {
         if ( highest < task_list.tasks[index].priority
@@ -189,10 +189,14 @@ static void dispatcher(task_switch_type_e type)
 
 }
 
-FORCE_INLINE static void context_switch(task_switch_type_e type)
+FORCE_INLINE static void context_switch(task_switch_type_e type) //TODO checar con el if first
 {
+//    static uint8_t first = 1;
     register uint32_t *sp asm("sp");
-    task_list.tasks[task_list.current_task].sp = sp;
+//    if(first){
+//        first = 0;
+        task_list.tasks[task_list.current_task].sp = sp-9;
+//    }
     task_list.current_task = task_list.next_task;
     task_list.tasks[task_list.current_task].state = S_RUNNING;
     SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;

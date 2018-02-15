@@ -11,6 +11,7 @@
 #include "rtos.h"
 #include "rtos_config.h"
 #include "clock_config.h"
+#include "fsl_debug_console.h"
 
 #ifdef RTOS_ENABLE_IS_ALIVE
 #include "fsl_gpio.h"
@@ -92,7 +93,7 @@ static void idle_task(void);
 // API implementation
 /**********************************************************************************/
 
-void rtos_start_scheduler(void)//TODO faltan mamadas
+void rtos_start_scheduler(void)
 {
 #ifdef RTOS_ENABLE_IS_ALIVE
 	init_is_alive();
@@ -122,7 +123,7 @@ rtos_task_handle_t rtos_create_task(void (*task_body)(), uint8_t priority,
         task_list.tasks[task_list.nTasks].state =
                 kStartSuspended == autostart ? S_SUSPENDED : S_READY;
         task_list.tasks[task_list.nTasks].stack[RTOS_STACK_SIZE
-                - STACK_PC_OFFSET] = (uint32_t) task_body;
+                - STACK_LR_OFFSET] = (uint32_t) task_body;
         task_list.tasks[task_list.nTasks].stack[RTOS_STACK_SIZE
                         - STACK_PSR_OFFSET] = STACK_PSR_DEFAULT;
         retval = task_list.nTasks;
@@ -132,22 +133,26 @@ rtos_task_handle_t rtos_create_task(void (*task_body)(), uint8_t priority,
 
 rtos_tick_t rtos_get_clock(void)
 {
-	return 0;
+	return task_list.global_tick;
 }
 
 void rtos_delay(rtos_tick_t ticks)
 {
-
+    task_list.tasks[task_list.current_task].state = S_WAITING;
+    task_list.tasks[task_list.current_task].local_tick += ticks;
+    dispatcher(kFromNormalExec);
 }
 
 void rtos_suspend_task(void)
 {
-
+    task_list.tasks[task_list.current_task].state = S_SUSPENDED;
+    dispatcher(kFromNormalExec);
 }
 
 void rtos_activate_task(rtos_task_handle_t task)
 {
-
+    task_list.tasks[task_list.current_task].state = S_READY;
+    dispatcher(kFromNormalExec);
 }
 
 /**********************************************************************************/
@@ -196,7 +201,18 @@ FORCE_INLINE static void context_switch(task_switch_type_e type)
 
 static void activate_waiting_tasks()
 {
-
+    uint32_t index = 0;
+    for(index = 0 ; index < task_list.nTasks; index++)
+    {
+        if(S_WAITING == task_list.tasks[index].state)
+        {
+            task_list.tasks[index].local_tick--;
+            if(0 == task_list.tasks[index].local_tick)
+            {
+                task_list.tasks[index].state = S_READY;
+            }
+        }
+    }
 }
 
 /**********************************************************************************/
@@ -207,7 +223,7 @@ static void idle_task(void)
 {
 	for (;;)
 	{
-
+//	    PRINTF("estamos en idle");
 	}
 }
 
@@ -220,6 +236,8 @@ void SysTick_Handler(void)
 #ifdef RTOS_ENABLE_IS_ALIVE
 	refresh_is_alive();
 #endif
+	task_list.global_tick++;
+	activate_waiting_tasks();
 	dispatcher(kFromISR);
 	reload_systick();
 }

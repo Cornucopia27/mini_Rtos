@@ -195,7 +195,14 @@ FORCE_INLINE static void context_switch(task_switch_type_e type) //TODO checar c
     register uint32_t *sp asm("sp");
 //    if(first){
 //        first = 0;
+    if(kFromISR == type)
+    {
+        task_list.tasks[task_list.current_task].sp = sp+9;
+    }
+    else
+    {
         task_list.tasks[task_list.current_task].sp = sp-9;
+    }
 //    }
     task_list.current_task = task_list.next_task;
     task_list.tasks[task_list.current_task].state = S_RUNNING;

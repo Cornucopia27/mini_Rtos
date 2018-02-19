@@ -30,7 +30,7 @@
 #define RTOS_IS_ALIVE_PIN			26
 /*! @brief Is alive signal period */
 #define RTOS_IS_ALIVE_PERIOD_IN_US  (1000000)
-#define RTOS_INVALID_TASK -1
+#define RTOS_INVALID_TASK           -1
 #endif
 
 #endif /* SOURCE_RTOS_CONFIG_H_ */

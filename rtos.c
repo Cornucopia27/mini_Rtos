@@ -28,6 +28,8 @@
 #define STACK_PSR_OFFSET			1
 #define STACK_PSR_DEFAULT			0x01000000
 
+#define SP_OFFSET                   9
+
 /**********************************************************************************/
 // IS ALIVE definitions
 /**********************************************************************************/
@@ -97,8 +99,8 @@ void rtos_start_scheduler(void)
 {
 #ifdef RTOS_ENABLE_IS_ALIVE
 	init_is_alive();
-	task_list.global_tick = 0;
-	rtos_create_task(idle_task, 0, kAutoStart);
+	task_list.global_tick = 0;  //sets global clock
+	rtos_create_task(idle_task, 0, kAutoStart); //creates idle task with lowest priority
 	task_list.current_task = RTOS_INVALID_TASK;
 #endif
 	SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_TICKINT_Msk
@@ -112,20 +114,21 @@ rtos_task_handle_t rtos_create_task(void (*task_body)(), uint8_t priority,
 		rtos_autostart_e autostart)
 {
     rtos_task_handle_t retval = RTOS_INVALID_TASK;
+    //comparison to check if we already have the max number of tasks
 	if(RTOS_MAX_NUMBER_OF_TASKS > task_list.nTasks)
 	{
-		task_list.tasks[task_list.nTasks].priority = priority;
-		task_list.tasks[task_list.nTasks].local_tick = 0;
+		task_list.tasks[task_list.nTasks].priority = priority; //assigns the priority level of the task
+		task_list.tasks[task_list.nTasks].local_tick = 0; //sets the local tick
         task_list.tasks[task_list.nTasks].task_body = task_body;
         task_list.tasks[task_list.nTasks].sp =
                 &(task_list.tasks[task_list.nTasks].stack[RTOS_STACK_SIZE - 1
                         - STACK_FRAME_SIZE]);
         task_list.tasks[task_list.nTasks].state =
-                kStartSuspended == autostart ? S_SUSPENDED : S_READY;
+                kStartSuspended == autostart ? S_SUSPENDED : S_READY; //puts the state in ready or suspended depending on autostart
         task_list.tasks[task_list.nTasks].stack[RTOS_STACK_SIZE
-                - STACK_LR_OFFSET] = (uint32_t) task_body;
+                - STACK_LR_OFFSET] = (uint32_t) task_body;  //assigns the current task_body
         task_list.tasks[task_list.nTasks].stack[RTOS_STACK_SIZE
-                        - STACK_PSR_OFFSET] = STACK_PSR_DEFAULT;
+                        - STACK_PSR_OFFSET] = STACK_PSR_DEFAULT; //assigns default PSR value
         retval = task_list.nTasks;
         task_list.nTasks++;
 	}
@@ -133,26 +136,26 @@ rtos_task_handle_t rtos_create_task(void (*task_body)(), uint8_t priority,
 
 rtos_tick_t rtos_get_clock(void)
 {
-	return task_list.global_tick;
+	return task_list.global_tick; //returns global clock
 }
 
 void rtos_delay(rtos_tick_t ticks)
 {
-    task_list.tasks[task_list.current_task].state = S_WAITING;
-    task_list.tasks[task_list.current_task].local_tick = ticks;
-    dispatcher(kFromNormalExec);
+    task_list.tasks[task_list.current_task].state = S_WAITING; //sets state to waiting
+    task_list.tasks[task_list.current_task].local_tick = ticks; //makes a delay of the amount of ticks received
+    dispatcher(kFromNormalExec); //calls dispatcher from current task
 }
 
 void rtos_suspend_task(void)
 {
-    task_list.tasks[task_list.current_task].state = S_SUSPENDED;
-    dispatcher(kFromNormalExec);
+    task_list.tasks[task_list.current_task].state = S_SUSPENDED; //sets state to suspended
+    dispatcher(kFromNormalExec); //calls dispatcher from current task
 }
 
 void rtos_activate_task(rtos_task_handle_t task)
 {
-    task_list.tasks[task].state = S_READY;
-    dispatcher(kFromNormalExec);
+    task_list.tasks[task].state = S_READY; //sets state to suspended
+    dispatcher(kFromNormalExec); //calls dispatcher from current task
 }
 
 /**********************************************************************************/
@@ -166,61 +169,58 @@ static void reload_systick(void)
 	SysTick->VAL = 0;
 }
 
-static void dispatcher(task_switch_type_e type)
+static void dispatcher(task_switch_type_e type) //handles of scheduling, gets called from interruption or within task
 {
-    rtos_task_handle_t next_task = RTOS_INVALID_TASK;
+    rtos_task_handle_t next_task = RTOS_INVALID_TASK; //sets next task as idle
     uint8_t index;
-    int8_t highest = -1;
-    for(index = 0 ; index < task_list.nTasks ; index ++)
+    int8_t highest = -1; //sets the current highest priority as -1
+    for(index = 0 ; index < task_list.nTasks ; index ++) //for the number of current tasks
     {
         if ( highest < task_list.tasks[index].priority
                 && (S_READY == task_list.tasks[index].state
-                        || S_RUNNING == task_list.tasks[index].state))
+                        || S_RUNNING == task_list.tasks[index].state)) // if the task is running and its priority is higher it's next
         {
             next_task = index;
             highest = task_list.tasks[index].priority;
         }
     }
-    if(task_list.current_task != next_task)
+    if(task_list.current_task != next_task) //if the current task is different from the next one
     {
-        task_list.next_task = next_task;
-        context_switch(type);
+        task_list.next_task = next_task; //sets that task as the next one
+        context_switch(type); //calls for a context switch from within the task
     }
 
 }
 
 FORCE_INLINE static void context_switch(task_switch_type_e type) //TODO checar con el if first
 {
-//    static uint8_t first = 1;
-    register uint32_t *sp asm("sp");
-//    if(first){
-//        first = 0;
-    if(kFromISR == type)
+
+    register uint32_t *sp asm("sp"); //pointer for current sp dir
+    if(kFromISR == type) //if it comes from isr gives proper offset
     {
-        task_list.tasks[task_list.current_task].sp = sp+9;
+        task_list.tasks[task_list.current_task].sp = sp + SP_OFFSET;
     }
-    else
+    else //it comes from normal execution and gives proper offset
     {
-        task_list.tasks[task_list.current_task].sp = sp-9;
+        task_list.tasks[task_list.current_task].sp = sp - SP_OFFSET;
     }
-//    }
-    task_list.current_task = task_list.next_task;
-    task_list.tasks[task_list.current_task].state = S_RUNNING;
-    SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
+    task_list.current_task = task_list.next_task; //changes task
+    task_list.tasks[task_list.current_task].state = S_RUNNING; //sets state to running
+    SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk; //uses pendSV to push the current stack
 
 }
 
 static void activate_waiting_tasks()
 {
     uint32_t index = 0;
-    for(index = 0 ; index < task_list.nTasks; index++)
+    for(index = 0 ; index < task_list.nTasks; index++) //goes through the array to all tasks
     {
-        if(S_WAITING == task_list.tasks[index].state)
+        if(S_WAITING == task_list.tasks[index].state) //if they're on waiting
         {
-            task_list.tasks[index].local_tick--;
+            task_list.tasks[index].local_tick--; //reduces their local clock until 0
             if(0 == task_list.tasks[index].local_tick)
             {
-                task_list.tasks[index].state = S_READY;
+                task_list.tasks[index].state = S_READY; //when the clock reaches 0 it's ready
             }
         }
     }
